@@ -1,7 +1,8 @@
 import os
+from pathlib import Path
 
 from PIL import Image
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 RAW_DIR = 'raw'
 
@@ -15,7 +16,6 @@ class RectItem(QtWidgets.QGraphicsRectItem):
 class ImageView(QtWidgets.QGraphicsView):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._zoom = 0
         self._empty = True
         self.setDragMode(QtWidgets.QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(
@@ -27,10 +27,8 @@ class ImageView(QtWidgets.QGraphicsView):
         assert event
         if event.angleDelta().y() > 0:
             factor = 1.25
-            self._zoom += 1
         else:
             factor = 0.8
-            self._zoom -= 1
         self.scale(factor, factor)
 
     def mousePressEvent(self, event):
@@ -45,16 +43,15 @@ class ImageView(QtWidgets.QGraphicsView):
 
     def reset_zoom(self):
         self.resetTransform()
-        self._zoom = 0
 
 
 class ImageState:
-    def __init__(self, path):
+    def __init__(self, path: Path | str):
         self.path = path
         self.image = Image.open(path)
         self.angle = 0
         self.rects = []
-        self._transform: 'QtGui.QTransform | None' = None
+        self.transform: 'QtGui.QTransform | None' = None
         self.center: 'QtCore.QPointF | None' = None
 
     def get_display_image(self):
@@ -64,7 +61,7 @@ class ImageState:
         return [RectItem(QtCore.QRectF(x, y, w, h)) for (x, y, w, h) in self.rects]
 
     @staticmethod
-    def save_all(states, save_path):
+    def save_all(states: list['ImageState'], save_path):
         with open(save_path, "w", encoding="utf-8") as f:
             for img_state in states:
                 has_angle = img_state.angle != 0
@@ -80,7 +77,7 @@ class ImageState:
                 f.write("\n")
 
     @staticmethod
-    def load_all(states, load_path):
+    def load_all(states: list['ImageState'], load_path):
         if not os.path.exists(load_path):
             return False
         with open(load_path, "r", encoding="utf-8") as f:
@@ -174,8 +171,8 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
         for rect_item in self.cur_image.to_rect_items():
             self.scene.addItem(rect_item)
         # 优雅地恢复状态：只有transform和center都为None时才自适应
-        if self.cur_image._transform is not None and self.cur_image.center is not None:
-            self.view.setTransform(self.cur_image._transform)
+        if self.cur_image.transform is not None and self.cur_image.center is not None:
+            self.view.setTransform(self.cur_image.transform)
             self.view.centerOn(self.cur_image.center)
         else:
             self.view.reset_zoom()
@@ -183,14 +180,14 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
                 self.scene.sceneRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio
             )
             # 保存自适应后的transform和center，避免下次再自适应
-            self.cur_image._transform = self.view.transform()
+            self.cur_image.transform = self.view.transform()
             binding = self.view.viewport()
             assert binding
             self.cur_image.center = self.view.mapToScene(binding.rect().center())
 
     def save_current_state(self):
         # 保存当前图片的缩放、中心、框
-        self.cur_image._transform = self.view.transform()
+        self.cur_image.transform = self.view.transform()
         binding = self.view.viewport()
         assert binding
         self.cur_image.center = self.view.mapToScene(binding.rect().center())
@@ -310,7 +307,7 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
                         QtWidgets.QGraphicsView.DragMode.ScrollHandDrag
                     )
                     # 先保存当前缩放和中心
-                    self.cur_image._transform = self.view.transform()
+                    self.cur_image.transform = self.view.transform()
                     binding = self.view.viewport()
                     assert binding
                     self.cur_image.center = self.view.mapToScene(
@@ -329,7 +326,7 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
             if self.cur_image.rects:
                 self.cur_image.rects.pop()
                 # 先保存当前缩放和中心
-                self.cur_image._transform = self.view.transform()
+                self.cur_image.transform = self.view.transform()
                 binding = self.view.viewport()
                 assert binding
                 self.cur_image.center = self.view.mapToScene(binding.rect().center())
