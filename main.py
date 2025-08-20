@@ -5,7 +5,76 @@ from PIL import Image
 from PySide6 import QtCore, QtGui, QtWidgets
 
 RAW_DIR = 'raw'
-RectItem = QtWidgets.QGraphicsRectItem
+
+
+class RectItem(QtWidgets.QGraphicsRectItem):
+    HANDLE_SIZE = 8
+
+    def __init__(self, rect: QtCore.QRectF | QtCore.QRect, parent: 'ImageState | None' = None):
+        super().__init__(rect)
+        self.setAcceptHoverEvents(True)
+        self._parent = parent
+        self._resizing = False
+        self._resizeDir = None
+
+    def hoverMoveEvent(self, event: QtWidgets.QGraphicsSceneHoverEvent):
+        pos = event.pos()
+        rect = self.rect()
+        margin = self.HANDLE_SIZE
+        # 判断鼠标是否在边缘
+        if abs(pos.x() - rect.left()) < margin:
+            self.setCursor(QtCore.Qt.CursorShape.SizeHorCursor)
+            self._resizeDir = 'left'
+        elif abs(pos.x() - rect.right()) < margin:
+            self.setCursor(QtCore.Qt.CursorShape.SizeHorCursor)
+            self._resizeDir = 'right'
+        elif abs(pos.y() - rect.top()) < margin:
+            self.setCursor(QtCore.Qt.CursorShape.SizeVerCursor)
+            self._resizeDir = 'top'
+        elif abs(pos.y() - rect.bottom()) < margin:
+            self.setCursor(QtCore.Qt.CursorShape.SizeVerCursor)
+            self._resizeDir = 'bottom'
+        else:
+            self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
+            self._resizeDir = None
+        super().hoverMoveEvent(event)
+
+    def mousePressEvent(self, event: QtWidgets.QGraphicsSceneMouseEvent):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._resizeDir:
+            self._resizing = True
+            self._startPos = event.pos()
+            self._origRect = self.rect()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QtWidgets.QGraphicsSceneMouseEvent):
+        if self._resizing and self._resizeDir:
+            delta = event.pos() - self._startPos
+            rect = QtCore.QRectF(self._origRect)
+            if self._resizeDir == 'left':
+                rect.setLeft(rect.left() + delta.x())
+            elif self._resizeDir == 'right':
+                rect.setRight(rect.right() + delta.x())
+            elif self._resizeDir == 'top':
+                rect.setTop(rect.top() + delta.y())
+            elif self._resizeDir == 'bottom':
+                rect.setBottom(rect.bottom() + delta.y())
+            # 限制最小尺寸
+            if rect.width() > 10 and rect.height() > 10:
+                self.setRect(rect.normalized())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QtWidgets.QGraphicsSceneMouseEvent):
+        if not self._resizing:
+            super().mouseReleaseEvent(event)
+        self._resizing = False
+        event.accept()
+        if self._parent:
+            self._parent.rects.remove(self._origRect)
+            self._parent.rects.append(self.rect())
 
 
 class ImageView(QtWidgets.QGraphicsView):
@@ -18,21 +87,19 @@ class ImageView(QtWidgets.QGraphicsView):
         )
         self.setResizeAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorUnderMouse)
 
-    def wheelEvent(self, event):
-        assert event
+    def wheelEvent(self, event: QtGui.QWheelEvent):
         if event.angleDelta().y() > 0:
             factor = 1.25
         else:
             factor = 0.8
         self.scale(factor, factor)
 
-    def mousePressEvent(self, event):
-        assert event
+    def mousePressEvent(self, event: QtGui.QMouseEvent):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.setDragMode(QtWidgets.QGraphicsView.DragMode.ScrollHandDrag)
         super().mousePressEvent(event)
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent):
         self.setDragMode(QtWidgets.QGraphicsView.DragMode.ScrollHandDrag)
         super().mouseReleaseEvent(event)
 
@@ -207,10 +274,7 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
         toolbar.addAction(crop_act)
 
         self.img_view.setMouseTracking(True)
-
-        binding = self.img_view.viewport()
-        assert binding
-        binding.installEventFilter(self)
+        self.img_view.viewport().installEventFilter(self)
         self.drawing = False
         self.start = QtCore.QPointF()
         self.temp_rect = None
@@ -233,8 +297,7 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
         self.img_view.setSceneRect(QtCore.QRectF(pixmap.rect()))
         # 添加所有框
         for rect in self.cur_image.rects:
-            rect_item = RectItem(rect)
-            self.scene.addItem(rect_item)
+            self.scene.addItem(RectItem(rect, self.cur_image))
         # 优雅地恢复状态：只有transform和center都为None时才自适应
         if self.cur_image.transform is not None and self.cur_image.center is not None:
             self.img_view.setTransform(self.cur_image.transform)
@@ -246,16 +309,16 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
             )
             # 保存自适应后的transform和center，避免下次再自适应
             self.cur_image.transform = self.img_view.transform()
-            binding = self.img_view.viewport()
-            assert binding
-            self.cur_image.center = self.img_view.mapToScene(binding.rect().center())
+            self.cur_image.center = self.img_view.mapToScene(
+                self.img_view.viewport().rect().center()
+            )
 
     def save_current_state(self):
         # 保存当前图片的缩放、中心、框
         self.cur_image.transform = self.img_view.transform()
-        binding = self.img_view.viewport()
-        assert binding
-        self.cur_image.center = self.img_view.mapToScene(binding.rect().center())
+        self.cur_image.center = self.img_view.mapToScene(
+            self.img_view.viewport().rect().center()
+        )
         # 框
         self.cur_image.rects = [
             rect_item.rect()
@@ -369,16 +432,14 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
                 )
                 # 先保存当前缩放和中心
                 self.cur_image.transform = self.img_view.transform()
-                binding = self.img_view.viewport()
-                assert binding
                 self.cur_image.center = self.img_view.mapToScene(
-                    binding.rect().center()
+                    self.img_view.viewport().rect().center()
                 )
                 self.display_image()
                 return True
         return super().eventFilter(object, event)
 
-    def keyPressEvent(self, event):  # pyright: ignore[reportIncompatibleMethodOverride]
+    def keyPressEvent(self, event: QtGui.QKeyEvent):
         # Ctrl+Z 撤销上一步框选
         if (
             event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
@@ -388,10 +449,8 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
                 self.cur_image.rects.pop()
                 # 先保存当前缩放和中心
                 self.cur_image.transform = self.img_view.transform()
-                binding = self.img_view.viewport()
-                assert binding
                 self.cur_image.center = self.img_view.mapToScene(
-                    binding.rect().center()
+                    self.img_view.viewport().rect().center()
                 )
                 self.display_image()
         else:
