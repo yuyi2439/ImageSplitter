@@ -123,6 +123,20 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
         self.setWindowTitle("图片分割工具")
         self.cur_idx = 0
 
+        # 设置主窗口大小并居中
+        self.resize(1200, 800)
+        qr = self.frameGeometry()
+        cp = QtWidgets.QApplication.primaryScreen().availableGeometry().center()
+        qr.moveCenter(cp)
+        self.move(qr.topLeft())
+
+        # 设置全局字体
+        font = QtGui.QFont("微软雅黑", 11)
+        QtWidgets.QApplication.setFont(font)
+
+        # 设置主窗口背景色
+        self.setStyleSheet("QMainWindow { background: #f7f7fa; }")
+
         self.images = [
             ImageState(os.path.join(RAW_DIR, f))
             for f in sorted(os.listdir(RAW_DIR))
@@ -131,16 +145,62 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
 
         self.scene = QtWidgets.QGraphicsScene()
         self.view = ImageView(self.scene)
+        # 设置QGraphicsView背景色
+        self.view.setBackgroundBrush(QtGui.QColor("#e6e6ed"))
         self.setCentralWidget(self.view)
 
+        # 美化工具栏
         toolbar = QtWidgets.QToolBar()
+        toolbar.setMovable(False)
+        toolbar.setStyleSheet("""
+            QToolBar {
+                spacing: 12px;
+                background: #f0f0f6;
+                border-bottom: 1px solid #cccccc;
+            }
+            QToolButton {
+                background: #ffffff;
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                padding: 6px 18px;
+                margin: 4px;
+                min-width: 80px;
+                font-weight: bold;
+            }
+            QToolButton:hover {
+                background: #e0e7ff;
+                border: 1.5px solid #7baaf7;
+            }
+            QToolButton:pressed {
+                background: #bdd7fa;
+            }
+        """)
         self.addToolBar(toolbar)
-        toolbar.addAction("上一张", self.prev_image)
-        toolbar.addAction("下一张", self.next_image)
-        toolbar.addAction("旋转", self.rotate_image)
-        toolbar.addAction("加载状态", self.load_states)
-        toolbar.addAction("保存状态", self.save_states)
-        toolbar.addAction("保存分割图片", self.save_crops)
+
+        # 添加工具栏按钮并加分隔符
+        prev_act = QtGui.QAction(QtGui.QIcon.fromTheme("go-previous"), "上一张", self)
+        next_act = QtGui.QAction(QtGui.QIcon.fromTheme("go-next"), "下一张", self)
+        rotate_act = QtGui.QAction(QtGui.QIcon.fromTheme("object-rotate-right"), "旋转", self)
+        load_act = QtGui.QAction(QtGui.QIcon.fromTheme("document-open"), "加载状态", self)
+        save_act = QtGui.QAction(QtGui.QIcon.fromTheme("document-save"), "保存状态", self)
+        crop_act = QtGui.QAction(QtGui.QIcon.fromTheme("edit-cut"), "保存分割图片", self)
+
+        prev_act.triggered.connect(self.prev_image)
+        next_act.triggered.connect(self.next_image)
+        rotate_act.triggered.connect(self.rotate_image)
+        load_act.triggered.connect(self.load_states)
+        save_act.triggered.connect(self.save_states)
+        crop_act.triggered.connect(self.save_crops)
+
+        toolbar.addAction(prev_act)
+        toolbar.addAction(next_act)
+        toolbar.addSeparator()
+        toolbar.addAction(rotate_act)
+        toolbar.addSeparator()
+        toolbar.addAction(load_act)
+        toolbar.addAction(save_act)
+        toolbar.addSeparator()
+        toolbar.addAction(crop_act)
 
         self.view.setMouseTracking(True)
 
