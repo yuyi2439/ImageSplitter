@@ -5,12 +5,7 @@ from PIL import Image
 from PySide6 import QtCore, QtGui, QtWidgets
 
 RAW_DIR = 'raw'
-
-
-class RectItem(QtWidgets.QGraphicsRectItem):
-    def __init__(self, *args):
-        super().__init__(*args)
-        self.setPen(QtGui.QPen(QtCore.Qt.GlobalColor.red, 2))
+RectItem = QtWidgets.QGraphicsRectItem
 
 
 class ImageView(QtWidgets.QGraphicsView):
@@ -50,15 +45,12 @@ class ImageState:
         self.path = path
         self.image = Image.open(path)
         self.angle = 0
-        self.rects = []
+        self.rects: list[QtCore.QRectF] = []
         self.transform: 'QtGui.QTransform | None' = None
         self.center: 'QtCore.QPointF | None' = None
 
     def get_display_image(self):
         return self.image.rotate(-self.angle, expand=True)
-
-    def to_rect_items(self):
-        return [RectItem(QtCore.QRectF(x, y, w, h)) for (x, y, w, h) in self.rects]
 
     @staticmethod
     def save_all(states: list['ImageState'], save_path):
@@ -72,8 +64,10 @@ class ImageState:
                 f.write(f"{img_name}\n")
                 if has_angle:
                     f.write(f"angle: {img_state.angle}\n")
-                for x, y, w, h in img_state.rects:
-                    f.write(f"rect: {int(x)},{int(y)},{int(w)},{int(h)}\n")
+                for rect in img_state.rects:
+                    f.write(
+                        f"rect: {int(rect.x())},{int(rect.y())},{int(rect.width())},{int(rect.height())}\n"
+                    )
                 f.write("\n")
 
     @staticmethod
@@ -111,7 +105,7 @@ class ImageState:
                 try:
                     vals = line.split(":", 1)[1].strip().split(",")
                     x, y, w, h = map(int, vals)
-                    cur_img.rects.append((x, y, w, h))
+                    cur_img.rects.append(QtCore.QRectF(x, y, w, h))
                 except Exception:
                     pass
         return True
@@ -144,15 +138,16 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
         ]
 
         self.scene = QtWidgets.QGraphicsScene()
-        self.view = ImageView(self.scene)
+        self.img_view = ImageView(self.scene)
         # 设置QGraphicsView背景色
-        self.view.setBackgroundBrush(QtGui.QColor("#e6e6ed"))
-        self.setCentralWidget(self.view)
+        self.img_view.setBackgroundBrush(QtGui.QColor("#e6e6ed"))
+        self.setCentralWidget(self.img_view)
 
         # 美化工具栏
         toolbar = QtWidgets.QToolBar()
         toolbar.setMovable(False)
-        toolbar.setStyleSheet("""
+        toolbar.setStyleSheet(
+            """
             QToolBar {
                 spacing: 12px;
                 background: #f0f0f6;
@@ -174,16 +169,25 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
             QToolButton:pressed {
                 background: #bdd7fa;
             }
-        """)
+        """
+        )
         self.addToolBar(toolbar)
 
         # 添加工具栏按钮并加分隔符
         prev_act = QtGui.QAction(QtGui.QIcon.fromTheme("go-previous"), "上一张", self)
         next_act = QtGui.QAction(QtGui.QIcon.fromTheme("go-next"), "下一张", self)
-        rotate_act = QtGui.QAction(QtGui.QIcon.fromTheme("object-rotate-right"), "旋转", self)
-        load_act = QtGui.QAction(QtGui.QIcon.fromTheme("document-open"), "加载状态", self)
-        save_act = QtGui.QAction(QtGui.QIcon.fromTheme("document-save"), "保存状态", self)
-        crop_act = QtGui.QAction(QtGui.QIcon.fromTheme("edit-cut"), "保存分割图片", self)
+        rotate_act = QtGui.QAction(
+            QtGui.QIcon.fromTheme("object-rotate-right"), "旋转", self
+        )
+        load_act = QtGui.QAction(
+            QtGui.QIcon.fromTheme("document-open"), "加载状态", self
+        )
+        save_act = QtGui.QAction(
+            QtGui.QIcon.fromTheme("document-save"), "保存状态", self
+        )
+        crop_act = QtGui.QAction(
+            QtGui.QIcon.fromTheme("edit-cut"), "保存分割图片", self
+        )
 
         prev_act.triggered.connect(self.prev_image)
         next_act.triggered.connect(self.next_image)
@@ -202,9 +206,9 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(crop_act)
 
-        self.view.setMouseTracking(True)
+        self.img_view.setMouseTracking(True)
 
-        binding = self.view.viewport()
+        binding = self.img_view.viewport()
         assert binding
         binding.installEventFilter(self)
         self.drawing = False
@@ -226,41 +230,37 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
         pixmap = QtGui.QPixmap.fromImage(qimg)
         self.scene.clear()
         self.scene.addPixmap(pixmap)
-        self.view.setSceneRect(QtCore.QRectF(pixmap.rect()))
+        self.img_view.setSceneRect(QtCore.QRectF(pixmap.rect()))
         # 添加所有框
-        for rect_item in self.cur_image.to_rect_items():
+        for rect in self.cur_image.rects:
+            rect_item = RectItem(rect)
             self.scene.addItem(rect_item)
         # 优雅地恢复状态：只有transform和center都为None时才自适应
         if self.cur_image.transform is not None and self.cur_image.center is not None:
-            self.view.setTransform(self.cur_image.transform)
-            self.view.centerOn(self.cur_image.center)
+            self.img_view.setTransform(self.cur_image.transform)
+            self.img_view.centerOn(self.cur_image.center)
         else:
-            self.view.reset_zoom()
-            self.view.fitInView(
+            self.img_view.reset_zoom()
+            self.img_view.fitInView(
                 self.scene.sceneRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio
             )
             # 保存自适应后的transform和center，避免下次再自适应
-            self.cur_image.transform = self.view.transform()
-            binding = self.view.viewport()
+            self.cur_image.transform = self.img_view.transform()
+            binding = self.img_view.viewport()
             assert binding
-            self.cur_image.center = self.view.mapToScene(binding.rect().center())
+            self.cur_image.center = self.img_view.mapToScene(binding.rect().center())
 
     def save_current_state(self):
         # 保存当前图片的缩放、中心、框
-        self.cur_image.transform = self.view.transform()
-        binding = self.view.viewport()
+        self.cur_image.transform = self.img_view.transform()
+        binding = self.img_view.viewport()
         assert binding
-        self.cur_image.center = self.view.mapToScene(binding.rect().center())
+        self.cur_image.center = self.img_view.mapToScene(binding.rect().center())
         # 框
         self.cur_image.rects = [
-            (
-                rect.rect().x(),
-                rect.rect().y(),
-                rect.rect().width(),
-                rect.rect().height(),
-            )
-            for rect in self.scene.items()
-            if isinstance(rect, RectItem)
+            rect_item.rect()
+            for rect_item in self.scene.items()
+            if isinstance(rect_item, RectItem)
         ]
 
     def prev_image(self):
@@ -305,7 +305,8 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
             img = img_state.get_display_image()
             img_name = os.path.basename(img_state.path)
             w_img, h_img = img.size
-            for x, y, w_rect, h_rect in img_state.rects:
+            for rect in img_state.rects:
+                x, y, w_rect, h_rect = rect.x(), rect.y(), rect.width(), rect.height()
                 x0 = max(0, int(x))
                 y0 = max(0, int(y))
                 x1 = min(w_img, int(x + w_rect))
@@ -325,57 +326,57 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
             self, "保存成功", "所有分割图片已保存到output文件夹"
         )
 
-    def eventFilter(  # pyright: ignore[reportIncompatibleMethodOverride]
-        self, source, event
-    ):
-        if source is self.view.viewport():
-            if event.type() == QtCore.QEvent.Type.MouseButtonPress:
-                if (
-                    event.button() == QtCore.Qt.MouseButton.LeftButton
-                    and event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
-                ):
-                    self.drawing = True
-                    self.start = self.view.mapToScene(event.pos())
-                    self.temp_rect = RectItem(QtCore.QRectF(self.start, self.start))
-                    self.scene.addItem(self.temp_rect)
-                    self.view.setDragMode(QtWidgets.QGraphicsView.DragMode.NoDrag)
-                    return True
-                else:
-                    self.view.setDragMode(
-                        QtWidgets.QGraphicsView.DragMode.ScrollHandDrag
-                    )
-                    self.drawing = False
-                    self.temp_rect = None
-            elif event.type() == QtCore.QEvent.Type.MouseMove:
-                if self.drawing and self.temp_rect:
-                    end = self.view.mapToScene(event.pos())
-                    rect = QtCore.QRectF(self.start, end).normalized()
-                    self.temp_rect.setRect(rect)
-                    return True
-            elif event.type() == QtCore.QEvent.Type.MouseButtonRelease:
-                if self.drawing and self.temp_rect:
-                    end = self.view.mapToScene(event.pos())
-                    rect = QtCore.QRectF(self.start, end).normalized()
-                    if rect.width() > 10 and rect.height() > 10:
-                        self.cur_image.rects.append(
-                            (rect.x(), rect.y(), rect.width(), rect.height())
-                        )
-                    self.scene.removeItem(self.temp_rect)
-                    self.temp_rect = None
-                    self.drawing = False
-                    self.view.setDragMode(
-                        QtWidgets.QGraphicsView.DragMode.ScrollHandDrag
-                    )
-                    # 先保存当前缩放和中心
-                    self.cur_image.transform = self.view.transform()
-                    binding = self.view.viewport()
-                    assert binding
-                    self.cur_image.center = self.view.mapToScene(
-                        binding.rect().center()
-                    )
-                    self.display_image()
-                    return True
-        return super().eventFilter(source, event)
+    def eventFilter(self, object: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if object is not self.img_view.viewport():
+            return super().eventFilter(object, event)
+        if not isinstance(event, QtGui.QMouseEvent):
+            return super().eventFilter(object, event)
+
+        if event.type() == QtCore.QEvent.Type.MouseButtonPress:
+            if (
+                event.button() == QtCore.Qt.MouseButton.LeftButton
+                and event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
+            ):
+                self.drawing = True
+                self.start = self.img_view.mapToScene(event.position().toPoint())
+                self.temp_rect = RectItem(QtCore.QRectF(self.start, self.start))
+                self.scene.addItem(self.temp_rect)
+                self.img_view.setDragMode(QtWidgets.QGraphicsView.DragMode.NoDrag)
+                return True
+            else:
+                self.img_view.setDragMode(
+                    QtWidgets.QGraphicsView.DragMode.ScrollHandDrag
+                )
+                self.drawing = False
+                self.temp_rect = None
+        elif event.type() == QtCore.QEvent.Type.MouseMove:
+            if self.drawing and self.temp_rect:
+                end = self.img_view.mapToScene(event.position().toPoint())
+                rect = QtCore.QRectF(self.start, end).normalized()
+                self.temp_rect.setRect(rect)
+                return True
+        elif event.type() == QtCore.QEvent.Type.MouseButtonRelease:
+            if self.drawing and self.temp_rect:
+                end = self.img_view.mapToScene(event.position().toPoint())
+                rect = QtCore.QRectF(self.start, end).normalized()
+                if rect.width() > 10 and rect.height() > 10:
+                    self.cur_image.rects.append(rect)
+                self.scene.removeItem(self.temp_rect)
+                self.temp_rect = None
+                self.drawing = False
+                self.img_view.setDragMode(
+                    QtWidgets.QGraphicsView.DragMode.ScrollHandDrag
+                )
+                # 先保存当前缩放和中心
+                self.cur_image.transform = self.img_view.transform()
+                binding = self.img_view.viewport()
+                assert binding
+                self.cur_image.center = self.img_view.mapToScene(
+                    binding.rect().center()
+                )
+                self.display_image()
+                return True
+        return super().eventFilter(object, event)
 
     def keyPressEvent(self, event):  # pyright: ignore[reportIncompatibleMethodOverride]
         # Ctrl+Z 撤销上一步框选
@@ -386,10 +387,12 @@ class ImageSplitterApp(QtWidgets.QMainWindow):
             if self.cur_image.rects:
                 self.cur_image.rects.pop()
                 # 先保存当前缩放和中心
-                self.cur_image.transform = self.view.transform()
-                binding = self.view.viewport()
+                self.cur_image.transform = self.img_view.transform()
+                binding = self.img_view.viewport()
                 assert binding
-                self.cur_image.center = self.view.mapToScene(binding.rect().center())
+                self.cur_image.center = self.img_view.mapToScene(
+                    binding.rect().center()
+                )
                 self.display_image()
         else:
             super().keyPressEvent(event)
