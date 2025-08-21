@@ -2,7 +2,9 @@ import os
 
 from PIL import Image
 
-from main import RAW_DIR, ImageState
+from src.image_state import ImageState
+
+from .main import RAW_DIR
 
 
 def apply_rotation(states_path="image_states.txt", img_dir=RAW_DIR):
